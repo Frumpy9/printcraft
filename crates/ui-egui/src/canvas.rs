@@ -133,6 +133,7 @@ pub struct DocView {
     viewport_screen: Rect,
     /// Pending zoom anchor: page, position within it (0..1), and offset from the viewport corner.
     zoom_anchor: Option<(usize, f32, f32, Vec2)>,
+    pub(crate) auto_scroll: crate::autoscroll::AutoScroll,
     /// Pages selected in the organize grid (0-based). Empty means "the current page".
     pub selected: BTreeSet<usize>,
     /// Anchor for ⇧-click range selection in the organize grid.
@@ -201,6 +202,11 @@ impl DocView {
         self.viewport_screen
     }
 
+    /// Whether a middle-button scrolling gesture is active (tests and automation).
+    pub fn auto_scrolling(&self) -> bool {
+        self.auto_scroll.active()
+    }
+
     /// Pages that could not be rendered, with the reason (for automation; 0-based pages).
     pub fn page_errors(&self) -> Vec<(usize, &str)> {
         let mut v: Vec<(usize, &str)> = self.errors.iter().map(|(p, e)| (*p, e.as_str())).collect();
@@ -245,6 +251,7 @@ impl DocView {
             screen_xforms: Vec::new(),
             viewport_screen: Rect::NOTHING,
             zoom_anchor: None,
+            auto_scroll: Default::default(),
             selected: BTreeSet::new(),
             select_anchor: None,
             pending_edit: None,
@@ -548,8 +555,14 @@ impl DocView {
         true
     }
 
-    /// Edit ▸ Select all: every word on the current page.
+    /// Select all: every page in Organize, or every word on the current page.
     pub fn select_all(&mut self) -> bool {
+        if self.organize {
+            self.selected = (0..self.page_count).collect();
+            // Keep the current page as the anchor for the next Shift-click.
+            self.select_anchor = (self.page_count > 0).then_some(self.current);
+            return !self.selected.is_empty();
+        }
         let page = self.current;
         let Some(t) = self.texts.get(&page) else { return false };
         if t.glyphs.is_empty() {
@@ -857,9 +870,6 @@ pub fn shortcuts(view: &mut DocView, ctx: &egui::Context) {
     if pressed(cmd(Key::G)) {
         view.find_step(true);
     }
-    if pressed(cmd(Key::A)) {
-        view.select_all();
-    }
     if pressed(cmd(Key::OpenBracket)) {
         view.view_history(false);
     }
@@ -911,6 +921,7 @@ pub fn document_area(app: &mut PrintCraftApp, index: usize, ui: &mut egui::Ui) {
     let Some(doc) = app.session.get(app.views[index].id) else { return };
     let info = &doc.info;
     if info.pages.is_empty() {
+        app.views[index].auto_scroll.cancel();
         ui.centered_and_justified(|ui| ui.label("This document has no pages."));
         return;
     }
@@ -931,7 +942,8 @@ pub fn document_area(app: &mut PrintCraftApp, index: usize, ui: &mut egui::Ui) {
         None => {}
     }
     if view.organize {
-        organize_grid(view, info, &doc.renderer, doc.allows_assembly(), ui, &t);
+        let auto_scroll_enabled = app.dialog.is_none() && app.close_request.is_none() && !app.palette_open;
+        organize_grid(view, info, &doc.renderer, doc.allows_assembly(), auto_scroll_enabled, ui, &t);
         return;
     }
 
@@ -950,6 +962,12 @@ pub fn document_area(app: &mut PrintCraftApp, index: usize, ui: &mut egui::Ui) {
         }
     }
     view.viewport_screen = avail;
+    let auto_delta = if app.dialog.is_none() && app.close_request.is_none() && !app.palette_open {
+        view.auto_scroll.update(ui, avail, false)
+    } else {
+        view.auto_scroll.cancel();
+        Vec2::ZERO
+    };
 
     let max_w = info.pages.iter().map(|p| view.display_size(p).0).fold(0.0, f32::max)
         * view.zoom
@@ -969,8 +987,15 @@ pub fn document_area(app: &mut PrintCraftApp, index: usize, ui: &mut egui::Ui) {
         _ => (0.0, rects.last().map(|r| r.bottom() + MARGIN).unwrap_or(0.0)),
     };
 
+    let middle_gesture = view.auto_scroll.blocks_input();
     let mut scroll = egui::ScrollArea::both().auto_shrink([false, false]).scroll_source(egui::scroll_area::ScrollSource {
-        drag: if app.quick_tool == QuickTool::Hand { egui::scroll_area::DragScroll::Always } else { egui::scroll_area::DragScroll::OnTouch },
+        drag: if middle_gesture {
+            egui::scroll_area::DragScroll::Never
+        } else if app.quick_tool == QuickTool::Hand {
+            egui::scroll_area::DragScroll::Always
+        } else {
+            egui::scroll_area::DragScroll::OnTouch
+        },
         ..Default::default()
     });
     if let Some((page, fx, fy, rel)) = view.zoom_anchor.take() {
@@ -1047,6 +1072,17 @@ pub fn document_area(app: &mut PrintCraftApp, index: usize, ui: &mut egui::Ui) {
     }
 
     let out = scroll.show_viewport(ui, |ui, viewport| {
+        // egui's drag responses accept every pointer button. Keep a wheel gesture from also
+        // selecting text, drawing a mark, or panning with the Hand tool.
+        if middle_gesture {
+            let opacity = ui.opacity();
+            ui.disable();
+            // Only interactions pause; the document must keep its original colours.
+            ui.set_opacity(opacity);
+        }
+        if auto_delta != Vec2::ZERO {
+            ui.scroll_with_delta_animation(auto_delta, egui::style::ScrollAnimation::none());
+        }
         let (resp_rect, resp) = ui.allocate_exact_size(vec2(content_w, content_h), Sense::click_and_drag());
         // The Hand tool pans: the content widget takes every drag, so scroll by its delta.
         if hand {
@@ -1496,6 +1532,8 @@ pub fn document_area(app: &mut PrintCraftApp, index: usize, ui: &mut egui::Ui) {
         });
         (wanted, visible_now)
     });
+
+    view.auto_scroll.paint(ui, avail);
 
     // Bound texture memory: keep sharp rasters only near the current page.
     if view.pages.len() > 24 {
@@ -2130,11 +2168,10 @@ fn organize_toolbar(view: &mut DocView, info: &DocInfo, editable: bool, ui: &mut
     });
     // Keys act on the selection unless a text field has focus.
     if editable && !ui.ctx().egui_wants_keyboard_input() {
-        use egui::{Key, KeyboardShortcut, Modifiers};
-        let (del, all, esc) = ui.input_mut(|i| {
+        use egui::{Key, Modifiers};
+        let (del, esc) = ui.input_mut(|i| {
             (
                 i.consume_key(Modifiers::NONE, Key::Delete) || i.consume_key(Modifiers::NONE, Key::Backspace),
-                i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, Key::A)),
                 i.consume_key(Modifiers::NONE, Key::Escape),
             )
         });
@@ -2152,9 +2189,6 @@ fn organize_toolbar(view: &mut DocView, info: &DocInfo, editable: bool, ui: &mut
         if del && targets.len() < n {
             view.pending_edit = Some(Edit::DeletePages { pages: targets });
         }
-        if all {
-            view.selected = (0..n).collect();
-        }
         if esc {
             view.selected.clear();
         }
@@ -2169,14 +2203,31 @@ fn drop_gap(cells: &[(usize, Rect)], p: Pos2) -> Option<usize> {
     Some(if p.x < r.center().x { *i } else { i + 1 })
 }
 
-fn organize_grid(view: &mut DocView, info: &DocInfo, pool: &RenderPool, editable: bool, ui: &mut egui::Ui, t: &Tokens) {
+fn organize_grid(view: &mut DocView, info: &DocInfo, pool: &RenderPool, editable: bool, auto_scroll_enabled: bool, ui: &mut egui::Ui, t: &Tokens) {
     let ppp = ui.ctx().pixels_per_point();
     let cell = vec2(190.0, 250.0);
     let mut open_page = None;
     organize_toolbar(view, info, editable, ui, t);
+    let viewport = ui.available_rect_before_wrap();
+    view.viewport_screen = viewport;
+    let auto_delta = if auto_scroll_enabled {
+        view.auto_scroll.update(ui, viewport, true)
+    } else {
+        view.auto_scroll.cancel();
+        Vec2::ZERO
+    };
+    let middle_gesture = view.auto_scroll.blocks_input();
     let mut cells: Vec<(usize, Rect)> = Vec::with_capacity(info.pages.len());
     let mut drop = false;
     egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+        if middle_gesture {
+            let opacity = ui.opacity();
+            ui.disable();
+            ui.set_opacity(opacity);
+        }
+        if auto_delta != Vec2::ZERO {
+            ui.scroll_with_delta_animation(auto_delta, egui::style::ScrollAnimation::none());
+        }
         ui.add_space(20.0);
         let cols = ((ui.available_width() - 40.0) / cell.x).floor().max(1.0) as usize;
         let rows = info.pages.len().div_ceil(cols);
@@ -2296,6 +2347,7 @@ fn organize_grid(view: &mut DocView, info: &DocInfo, pool: &RenderPool, editable
             view.org_drag = None;
         }
     });
+    view.auto_scroll.paint(ui, viewport);
     let s = THUMB_W * ppp / info.pages.iter().map(|p| p.width).fold(1.0, f32::max);
     let queue: Vec<RenderRequest> = (0..info.pages.len())
         .filter(|p| (!view.thumbs.contains_key(p) || view.stale_thumbs.contains(p)) && !view.errors.contains_key(p))

@@ -40,6 +40,7 @@ pub use create_ui::Clip;
 pub use link_ui::LinkDraft;
 pub use optimize_ui::{OptimizeDraft, OptimizeTab};
 pub use sign_ui::{DigitalIdEntry, SignDraft, SignStep};
+mod autoscroll;
 mod dialogs;
 mod edit_text_ui;
 mod editing;
@@ -1111,11 +1112,25 @@ impl PrintCraftApp {
             }
             return;
         }
+        if let Some(view) = self.active.and_then(|i| self.views.get_mut(i))
+            && view.auto_scroll.escape(ctx)
+        {
+            return;
+        }
         self.registry_shortcuts(ctx);
         if self.full_screen && ctx.input(|i| i.key_pressed(Key::Escape)) {
             self.set_full_screen(ctx, false);
         }
         if let Some(i) = self.active {
+            // Select all belongs to the document or page grid, unless a text field or
+            // overlay owns the keyboard. Other canvas shortcuts keep their own handling.
+            if self.dialog.is_none()
+                && !self.palette_open
+                && !ctx.egui_wants_keyboard_input()
+                && ctx.input_mut(|input| input.consume_shortcut(&egui::KeyboardShortcut::new(egui::Modifiers::COMMAND, Key::A)))
+            {
+                self.views[i].select_all();
+            }
             canvas::shortcuts(&mut self.views[i], ctx);
         }
     }
@@ -1177,6 +1192,14 @@ impl eframe::App for PrintCraftApp {
         self.autosave_tick(now);
         self.poll_updates();
         self.shortcuts(ctx);
+        // Scrolling is transient: never resume after changing tabs, opening a modal/palette,
+        // or returning to a window that lost focus.
+        let blocked = self.dialog.is_some() || self.close_request.is_some() || self.palette_open || !ctx.input(|i| i.focused);
+        for (index, view) in self.views.iter_mut().enumerate() {
+            if blocked || self.active != Some(index) {
+                view.auto_scroll.cancel();
+            }
+        }
         self.process_pending_edits();
         self.poll_export();
         self.poll_ocr();
