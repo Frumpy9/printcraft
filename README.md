@@ -113,6 +113,7 @@ PrintCraft renders PDFs with care for the details that make a page feel right: k
 - **Deep zoom stays sharp.** Large pages render in tiles, so text stays crisp at any magnification.
 - **Built to survive bad files.** Every page renders in isolation and damaged documents are repaired. Across the 983-file pdf.js test corpus the result is 0 crashes.
 - **Layouts for every task:** continuous, single page, two-up, view rotation, full screen and a distraction-free Read mode.
+- **Middle-wheel scrolling on every platform, including Linux.** Click the wheel in the document or Organize Pages, then move the mouse above or below the marker to scroll; farther away scrolls faster. Click again, press Escape, or use the wheel to stop. Holding the wheel while moving scrolls until you release it.
 - **Light and dark themes**, both designed to be easy on the eyes for long sessions.
 
 <table>

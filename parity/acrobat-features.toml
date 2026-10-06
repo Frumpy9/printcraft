@@ -887,11 +887,11 @@ title = "Automatic scrolling"
 area = "B"
 tier = "P2"
 milestone = "M3"
-status = "planned"
+status = "partial"
 commands = []
 tools = []
-evidence = []
-notes = ""
+evidence = ["crates/ui-egui/tests/control.rs::middle_click_autoscroll_latches_has_a_dead_zone_and_scrolls_both_directions", "crates/ui-egui/tests/control.rs::organize_pages_supports_autoscroll_without_selecting_or_reordering_pages"]
+notes = "Middle-button vertical autoscroll in the document and Organize Pages on all platforms; click to latch or hold and release, with cancellation on Escape, pointer/wheel input, focus loss, tab changes and dialogs. Driven headlessly through the opt-in UI control channel (ui.click/ui.move/ui.drag). Keyboard-started timed scrolling is not implemented."
 
 [[feature]]
 id = "view.zoom-in-out"
