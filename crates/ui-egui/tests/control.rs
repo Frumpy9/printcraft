@@ -77,6 +77,11 @@ fn start_autoscroll(h: &mut Harness<'static, PrintCraftApp>, c: &ControlClient) 
 #[test]
 fn middle_click_autoscroll_latches_has_a_dead_zone_and_scrolls_both_directions() {
     let (mut h, c) = harness();
+    // Keep the tracked page visible through the downward leg and reversal.
+    h.state_mut().set_option("zoom", "400").unwrap();
+    h.run_steps(3);
+    h.state_mut().views[0].go_to_page(0);
+    h.run_steps(2);
     let p = start_autoscroll(&mut h, &c);
     let top = h.state().views[0].page_screen_rect(0).unwrap().top();
     ok(&mut h, &c, "ui.move", json!({ "x": p.x + 100.0, "y": p.y + 8.0 }));
@@ -87,8 +92,13 @@ fn middle_click_autoscroll_latches_has_a_dead_zone_and_scrolls_both_directions()
     let down = h.state().views[0].page_screen_rect(0).unwrap().top();
     assert!(down < top - 30.0, "moving below the anchor scrolls down: {top} -> {down}");
     ok(&mut h, &c, "ui.move", json!({ "x": p.x, "y": p.y - 50.0 }));
+    // The control request itself takes frames while the previous downward motion continues.
+    // Measure reversal after it has arrived and the scroll area's layout has caught up.
+    h.run_steps(2);
+    let reversing = h.state().views[0].page_screen_rect(0).unwrap().top();
     h.run_steps(8);
-    assert!(h.state().views[0].page_screen_rect(0).unwrap().top() > down + 15.0, "moving above the anchor scrolls up");
+    let up = h.state().views[0].page_screen_rect(0).unwrap().top();
+    assert!(up > reversing + 15.0, "moving above the anchor scrolls up: {reversing} -> {up}");
     ok(&mut h, &c, "ui.click", json!({ "x": p.x, "y": p.y, "button": "middle" }));
     assert!(!h.state().views[0].auto_scrolling(), "a second wheel click stops");
     h.run_steps(2);
@@ -167,6 +177,67 @@ fn farther_from_the_click_scrolls_faster_in_the_viewer_and_page_grid() {
         assert_eq!(top(&h), at_anchor, "returning to the original click pauses scrolling");
         assert!(h.state().views[0].auto_scrolling(), "the toggle stays on at the anchor");
         ok(&mut h, &c, "ui.key", json!({ "key": "Escape" }));
+    }
+}
+
+#[test]
+fn autoscroll_uses_elapsed_frame_time_and_preserves_fractional_motion_in_both_views() {
+    use egui_kittest::kittest::Queryable;
+    for (organize, scale, zoom) in [(false, 1.0, "100"), (false, 2.0, "100"), (false, 1.0, "400"), (true, 1.0, "100"), (true, 2.0, "100")] {
+        for frames in [30, 60, 120, 144] {
+            let (mut h, c) = harness_pages(40);
+            h.set_pixels_per_point(scale);
+            h.state_mut().set_option("zoom", zoom).unwrap();
+            h.state_mut().views[0].organize = organize;
+            h.run_steps(3);
+            assert_eq!(h.ctx.pixels_per_point(), scale);
+            let top = |h: &Harness<'static, PrintCraftApp>| {
+                if organize { h.get_by_label("Page 1").rect().top() } else { h.state().views[0].page_screen_rect(0).unwrap().top() }
+            };
+            let step = |h: &mut Harness<'static, PrintCraftApp>| {
+                // Deliberately differ from the harness's predicted frame interval: scrolling
+                // must follow the elapsed time rather than the display's predicted rate.
+                h.input_mut().time = Some(h.ctx.input(|i| i.time) + 1.0 / f64::from(frames));
+                h.step();
+            };
+            let p = start_autoscroll(&mut h, &c);
+            for (distance, expected) in [(16.0, 17.83), (50.0, 218.67)] {
+                ok(&mut h, &c, "ui.move", json!({ "x": p.x, "y": p.y + distance }));
+                step(&mut h);
+                step(&mut h);
+                let before = top(&h);
+                for _ in 0..frames {
+                    step(&mut h);
+                }
+                let travelled = before - top(&h);
+                assert!(
+                    (travelled - expected).abs() < 1.0,
+                    "organize={organize}, scale={scale}, zoom={zoom}, fps={frames}, distance={distance}, travelled={travelled}"
+                );
+                assert_eq!(
+                    h.output().viewport_output[&egui::ViewportId::ROOT].repaint_delay,
+                    std::time::Duration::ZERO,
+                    "motion schedules the next display frame"
+                );
+            }
+            ok(&mut h, &c, "ui.move", json!({ "x": p.x, "y": p.y + 15.0 }));
+            step(&mut h);
+            let paused = top(&h);
+            for _ in 0..frames {
+                step(&mut h);
+            }
+            assert_eq!(top(&h), paused, "the dead zone pauses immediately, without coasting");
+            assert!(h.state().views[0].auto_scrolling());
+            ok(&mut h, &c, "ui.move", json!({ "x": p.x, "y": p.y - 50.0 }));
+            step(&mut h);
+            step(&mut h);
+            let before = top(&h);
+            for _ in 0..frames {
+                step(&mut h);
+            }
+            assert!((top(&h) - before - 218.67).abs() < 1.0, "resuming above the anchor reverses direction");
+            ok(&mut h, &c, "ui.key", json!({ "key": "Escape" }));
+        }
     }
 }
 

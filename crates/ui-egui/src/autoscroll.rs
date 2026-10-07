@@ -2,9 +2,13 @@
 
 use egui::{Context, CursorIcon, Event, Key, PointerButton, Pos2, Stroke, Vec2, vec2};
 
-const DEAD_ZONE: f32 = 12.0;
-const SPEED_PER_POINT: f32 = 16.0;
-const MAX_SPEED: f32 = 3200.0;
+const DEAD_ZONE: f32 = 15.0;
+// Chromium's autoscroll_controller.cc uses distance^2.2 * 0.000008; its
+// ui/events/gestures/fixed_velocity_curve.cc multiplies elapsed seconds by 5000.
+const SPEED_EXPONENT: f32 = 2.2;
+const SPEED_MULTIPLIER: f32 = 0.04;
+// Bound hostile coordinates before exponentiation, far beyond ordinary screen distances.
+const MAX_DISPLACEMENT: f32 = 1_000_000.0;
 
 #[derive(Default)]
 pub(crate) struct AutoScroll {
@@ -87,8 +91,10 @@ impl AutoScroll {
         let displacement = pointer.y - anchor.y;
         // Cap the elapsed time too: returning from an idle/hidden window must never jump pages.
         let delta = scroll_delta(displacement, dt);
-        if delta != 0.0 {
-            ctx.request_repaint_after(std::time::Duration::from_millis(16));
+        if displacement.is_finite() && displacement.abs() > DEAD_ZONE {
+            // Continuous redraws let stable_dt use measured frame time. Delayed redraws
+            // instead use predicted_dt, which can make speed depend on the actual frame rate.
+            ctx.request_repaint();
         }
         vec2(0.0, delta)
     }
@@ -125,7 +131,12 @@ fn scroll_delta(displacement: f32, dt: f32) -> f32 {
     if !displacement.is_finite() || !dt.is_finite() {
         return 0.0;
     }
-    let speed = ((displacement.abs() - DEAD_ZONE).max(0.0) * SPEED_PER_POINT).min(MAX_SPEED);
+    let distance = displacement.abs();
+    if distance <= DEAD_ZONE {
+        return 0.0;
+    }
+    // Chromium uses the full distance outside the dead zone, without subtracting its radius.
+    let speed = distance.min(MAX_DISPLACEMENT).powf(SPEED_EXPONENT) * SPEED_MULTIPLIER;
     // egui's delta moves content, the opposite of the scroll offset.
     -displacement.signum() * speed * dt.clamp(0.0, 0.05)
 }
@@ -135,19 +146,51 @@ mod tests {
     use super::*;
 
     #[test]
-    fn speed_has_a_dead_zone_is_symmetric_and_is_bounded() {
-        for y in [-12.0, -1.0, 0.0, 1.0, 12.0] {
+    fn chromium_curve_is_gentle_near_the_anchor_and_accelerates_farther_away() {
+        // Reference speeds in screen points/second from Chromium's distance exponent (2.2),
+        // controller multiplier (0.000008), and fixed-velocity animation multiplier (5000).
+        for (distance, expected_speed) in [(25.0, 48.0), (50.0, 219.0), (100.0, 1005.0), (200.0, 4617.0)] {
+            let speed = -scroll_delta(distance, 0.01) / 0.01;
+            assert!((speed - expected_speed).abs() < 1.0, "distance={distance}, speed={speed}, expected={expected_speed}");
+        }
+        for distance in [-15.0, 0.0, 15.0] {
+            assert_eq!(scroll_delta(distance, 0.01), 0.0);
+        }
+        assert!(scroll_delta(15.1, 0.01) < 0.0);
+    }
+
+    #[test]
+    fn fractional_motion_covers_the_same_distance_at_different_frame_rates() {
+        for distance in [16.0, 50.0, 200.0] {
+            let expected = scroll_delta(distance, 0.01) * 100.0;
+            for frames in [30, 60, 120, 144] {
+                let delta = scroll_delta(distance, 1.0 / frames as f32);
+                let travelled: f32 = (0..frames).map(|_| delta).sum();
+                assert!((travelled - expected).abs() < expected.abs() * 0.00001);
+            }
+        }
+        assert!(scroll_delta(16.0, 1.0 / 144.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn speed_has_a_dead_zone_is_symmetric_and_rejects_invalid_input() {
+        for y in [-15.0, -1.0, 0.0, 1.0, 15.0] {
             assert_eq!(scroll_delta(y, 0.016), 0.0);
         }
         assert!(scroll_delta(30.0, 0.016) < 0.0);
-        assert!(scroll_delta(100.0, 1.0 / 60.0).abs() > 20.0, "a moderate displacement scrolls at least 1200 points per second");
-        for (near, far) in [(13.0, 30.0), (30.0, 100.0), (100.0, 200.0)] {
+        for (near, far) in [(16.0, 30.0), (30.0, 100.0), (100.0, 200.0)] {
             assert!(scroll_delta(far, 0.016).abs() > scroll_delta(near, 0.016).abs());
         }
         assert_eq!(scroll_delta(30.0, 0.016), -scroll_delta(-30.0, 0.016));
-        assert_eq!(scroll_delta(1000.0, 0.016), -MAX_SPEED * 0.016);
-        assert_eq!(scroll_delta(1000.0, 10.0), -MAX_SPEED * 0.05);
-        assert_eq!(scroll_delta(f32::NAN, 0.016), 0.0);
-        assert_eq!(scroll_delta(1000.0, f32::INFINITY), 0.0);
+        assert!(scroll_delta(200.0, 0.01).abs() / 0.01 > 3200.0, "ordinary distances have no linear-curve speed ceiling");
+        assert_eq!(scroll_delta(1000.0, 10.0), scroll_delta(1000.0, 0.05));
+        assert_eq!(scroll_delta(1000.0, -1.0), 0.0);
+        assert_eq!(scroll_delta(f32::MAX, 0.016), scroll_delta(MAX_DISPLACEMENT, 0.016));
+        assert!(scroll_delta(f32::MAX, 0.016).is_finite());
+        assert_eq!(scroll_delta(-f32::MAX, 0.016), -scroll_delta(f32::MAX, 0.016));
+        for invalid in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+            assert_eq!(scroll_delta(invalid, 0.016), 0.0);
+            assert_eq!(scroll_delta(1000.0, invalid), 0.0);
+        }
     }
 }
