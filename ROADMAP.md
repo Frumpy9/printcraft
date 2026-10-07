@@ -1,4 +1,4 @@
-# PrintCraft roadmap
+# PdfCraft roadmap
 
 The milestones, current progress and time estimates to Acrobat Pro feature parity. Keep this up to date:
 - **Every session:** update the progress column and add a line to the log.
@@ -6,7 +6,7 @@ The milestones, current progress and time estimates to Acrobat Pro feature parit
 
 Detailed task lists and acceptance tests are in `plan/execution-plan.md` (local-only). This file is the public summary.
 
-**What "parity" means here:** the offline feature set of Acrobat Pro, milestones M0–M14. It excludes Adobe's cloud services (Document Cloud storage, Adobe Sign, the Adobe AI Assistant). Those have no clean-room equivalent; PrintCraft's alternatives are local-first, plus opt-in providers (M13).
+**What "parity" means here:** the offline feature set of Acrobat Pro, milestones M0–M14. It excludes Adobe's cloud services (Document Cloud storage, Adobe Sign, the Adobe AI Assistant). Those have no clean-room equivalent; PdfCraft's alternatives are local-first, plus opt-in providers (M13).
 
 ## Estimate summary
 
@@ -102,7 +102,7 @@ Hours are for a single agent (low–high). "Done" is the estimated fraction of t
 | M10 | OCR, create, export, print | 200–350 | 33% | 130–235 | Done: create from blank/text/PNG/JPEG/TIFF (multi-page)/GIF/BMP; export PNG/JPEG/TIFF and text; Print (Acrobat's sizing, n-up, booklet, poster, comments & forms, preview, CUPS spooler, print-ready PDF). Done since: export all images; OCR (searchable image for pages, ranges and multiple files). Missing: OCR languages beyond Latin, editable-text OCR output, Office export/import, Windows/web printing |
 | M11 | Optimize, preflight, PDF/A/X/UA, print production | 200–350 | 18% | 165–290 | Done: new `optimize` crate: Reduce File Size and the PDF Optimizer (images measured where drawn, bicubic downsampling, JPEG/ZIP recompression only when smaller, discard objects and user data, Flate clean-up, resource merging, object streams). Missing: fonts and transparency panels, space audit, preflight, PDF/A/X/UA |
 | M12 | Accessibility, compare, measure, search, XFA | 200–380 | 20% | 160–305 | Done: new `a11y` crate with the Accessibility Checker (all 32 rules, report, Fix/Skip/Explain, options dialog and results panel, agent tools). Missing: autotag, Tags/Order/Content panels, Reading Order tool, alt-text workflow, compare, measure, search index, XFA |
-| M13 | Automation (MCP, Action Wizard, CLI) + AI providers | 60–120 | 45% | 33–66 | Done: MCP resources (document info, text, page images); headless tool table (91 tools incl. signing, optimizing, initial view, links, stamps, data exchange, comment review, forms authoring and scripts, redaction, sanitize, print, add content), opt-in MCP server over stdio, CLI `run`/`tools`, UI control channel with drag. Missing: Action Wizard, AI providers |
+| M13 | Automation (MCP, Action Wizard, CLI) + AI providers | 60–120 | 45% | 33–66 | Done: MCP resources (document info, text, page images); headless tool table (123 tools incl. signing, optimizing, initial view, links, stamps, data exchange, comment review, forms authoring and scripts, redaction, sanitize, print, add content), opt-in MCP server over stdio, CLI `run`/`tools`, UI control channel with drag. Missing: Action Wizard, AI providers |
 | M14 | 1.0 polish: performance, localization, installers | 120–250 | 0% | 120–250 | |
 | | **Total (original plan sizing)** | **2,085–3,840** | **≈ 35%** | **≈ 1,350–2,500 at the planned rate; ≈ 600–1,100 at the measured rate** | |
 
@@ -127,6 +127,9 @@ M0 → M1 → M2 → M3 → M4 must happen in order. After M4, M5–M12 can run 
 
 Newest first. One line per session: the date, what moved, and the new overall percentage.
 
+- **2026-10-07 (community navigation, PR #111):** Merged upstream's PdfCraft rename and updated the middle-button scrolling regression harness to the new app and crate names. Linux-only scrolling behavior remains unchanged. Overall effort estimate remains ≈ 30–35%.
+
+- **2026-10-07 (session 16):** PrintCraft is renamed PdfCraft: repo `storytold/pdfcraft`, crates and binaries `pdfcraft*`, bundle id `ai.storyteller.pdfcraft`. On first launch the app moves the old PrintCraft settings and crash-recovery folders to the new name, so upgrades keep recent files, preferences and unsaved work. No feature change. ≈ 30–35%.
 - **2026-10-07 (session 15):** Five community issues, each with a regression test: in two-page view, Next page moves a whole spread (#77, #70); Export to Word opens in Word again, with control characters dropped and receipt-length pages kept within Word's 22 in, checked in Microsoft Word (#78, #72); macOS opens PDFs from Finder, Open With and the Dock (Apple events through the audited `fmv-macos-events`, PDF declared in the Info.plist), and the packaging no longer describes the image editor it was copied from (#82, #73); Add text keeps the box being typed when you click elsewhere, with Done and Discard beside it, reproduced and checked with real OS input (#86, #74); sharper, higher-contrast text, most visible on Windows, with every text colour at WCAG AA in both themes (#84, #76; the console window was already gone in 0.2.1). Still open: #79 (layered "not verified" signature appearances), #80 (native macOS menu bar), #81 (Homebrew and Scoop). P0 88%, P1 53%; 805 features 50.2% shipped (53.7% weighted). ≈ 30–35%.
 - **2026-10-06 (community navigation):** Linux-only middle-button vertical scrolling in the document and Organize grid, toggled by clicking the wheel, with cancellation that protects page tools and selection. Scrolling stays on after releasing the wheel, even if the pointer moved before release. Manual feedback led to a Chromium-style distance^2.2 speed curve, a 15-screen-point dead zone, and continuous redraws that use elapsed frame time; the former linear speed cap is removed. Headless UI/control regressions cover fractional movement, consistent travel at 30/60/120/144 fps, pause/resume and cancellation. Other platforms retain their existing middle-button input behavior, with a regression that checks the custom scroller neither blocks input nor changes the cursor or consumes Escape. No new dependency. Automatic scrolling remains partial because keyboard-started timed scrolling is absent. Overall effort estimate remains ≈ 30–35%.
 - **2026-10-06 (session 14):** Issues: move and resize existing text boxes in Edit text (#59, closes #40); Windows release builds open no console window and the Start Menu shortcut has its icon (#58, #57; rolled out to every Craft app); native Windows ARM64 installers, installed and run on an ARM64 runner in CI (#66, #71; the intermittent ARM64 test crash was a WARP shader-JIT race between parallel GPU-rendering tests, not our code); XFA forms are detected and explained instead of failing silently (#65, #60 stays open for real XFA). Also: squiggly underline tool, comment opacity, Preferences ▸ Identity, drag-and-drop/hover tests; community table export to Word/HTML/RTF (#62, with linear-time detection and a column cap). #63 (timestamps/LTV with outbound network) held for review fixes and an owner decision on network access. ≈ 30–35% (unchanged).
@@ -175,7 +178,7 @@ Newest first. One line per session: the date, what moved, and the new overall pe
   - Overall ≈ 9.5%.
 
 - **2026-09-30 (session 5, after a machine crash; no work lost):**
-  - Agent control: new `printcraft-automation` crate with 20 JSON-Schema tools, an opt-in MCP server (`printcraft-cli mcp`, stdio only, can be compiled out), and `printcraft-cli run`/`tools`.
+  - Agent control: new `pdfcraft-automation` crate with 20 JSON-Schema tools, an opt-in MCP server (`pdfcraft-cli mcp`, stdio only, can be compiled out), and `pdfcraft-cli run`/`tools`.
   - Text on rotated pages now reads along its lines; the pdf.js oracle is unchanged at median 0.980.
   - Finding text in 520 pages: 17.9 s → 3.7 s (parallel), about 20 ms when repeated (cached).
   - CI: dependency licence audit (`deny.toml`, `xtask deny`) and a GitHub workflow for macOS, Windows, Linux and wasm.
