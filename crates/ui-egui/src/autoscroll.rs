@@ -1,4 +1,4 @@
-//! Platform-independent middle-button scrolling for the document viewport.
+//! Linux middle-button scrolling for the document viewport.
 
 use egui::{Context, CursorIcon, Event, Key, PointerButton, Pos2, Stroke, Vec2, vec2};
 
@@ -37,6 +37,15 @@ impl AutoScroll {
     /// Run before the document's widgets. Starting is restricted to the unobstructed viewport;
     /// once started, moving outside that viewport still controls the speed.
     pub(crate) fn update(&mut self, ui: &egui::Ui, viewport: egui::Rect, organize: bool) -> Vec2 {
+        self.update_for_platform(ui, viewport, organize, cfg!(target_os = "linux"))
+    }
+
+    fn update_for_platform(&mut self, ui: &egui::Ui, viewport: egui::Rect, organize: bool, supported: bool) -> Vec2 {
+        // Leave middle-button events and widget interactions to the existing platform behavior.
+        if !supported {
+            self.cancel();
+            return Vec2::ZERO;
+        }
         let ctx = ui.ctx();
         let (pointer, middle_press, middle_down, middle_released, cancel, cancel_button, dt) = ctx.input(|i| {
             let cancel_button = [PointerButton::Primary, PointerButton::Secondary, PointerButton::Extra1, PointerButton::Extra2]
@@ -144,6 +153,40 @@ fn scroll_delta(displacement: f32, dt: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unsupported_platform_leaves_middle_button_and_escape_input_untouched() {
+        for previously_active in [false, true] {
+            let ctx = Context::default();
+            let pos = egui::pos2(100.0, 100.0);
+            let mut scroll = AutoScroll { anchor: previously_active.then_some(pos), block_input: previously_active, ..Default::default() };
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(Pos2::ZERO, vec2(400.0, 400.0))),
+                    events: vec![
+                        Event::PointerMoved(pos),
+                        Event::PointerButton { pos, button: PointerButton::Middle, pressed: true, modifiers: egui::Modifiers::NONE },
+                        Event::Key { key: Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE },
+                    ],
+                    ..Default::default()
+                },
+                |ui| {
+                    assert_eq!(scroll.update_for_platform(ui, ui.max_rect(), false, false), Vec2::ZERO);
+                    assert!(!scroll.active(), "unsupported platforms must not start or retain custom scrolling");
+                    assert!(!scroll.blocks_input(), "middle-button input must reach the existing widgets");
+                    scroll.paint(ui, ui.max_rect());
+                    assert_eq!(ctx.output(|o| o.cursor_icon), CursorIcon::Default, "no custom marker or cursor");
+                    assert!(!scroll.escape(&ctx));
+                    ctx.input(|i| {
+                        assert!(i.pointer.button_pressed(PointerButton::Middle));
+                        assert!(i.key_pressed(Key::Escape), "Escape must remain available to the existing shortcuts");
+                    });
+                },
+            );
+            // This input-only test has no renderer to apply the generated font texture.
+            output.textures_delta.clear();
+        }
+    }
 
     #[test]
     fn chromium_curve_is_gentle_near_the_anchor_and_accelerates_farther_away() {

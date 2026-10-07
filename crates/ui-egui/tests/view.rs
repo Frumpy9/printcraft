@@ -46,6 +46,7 @@ fn rect(h: &Harness<'static, PrintCraftApp>, page: usize) -> Option<egui::Rect> 
     h.state().views[0].page_screen_rect(page)
 }
 
+#[cfg(target_os = "linux")]
 #[test]
 fn middle_button_scrolling_keeps_page_colours_in_both_themes() {
     use egui_kittest::kittest::Queryable;
