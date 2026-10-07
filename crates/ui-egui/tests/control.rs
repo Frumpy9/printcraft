@@ -99,7 +99,7 @@ fn middle_click_autoscroll_latches_has_a_dead_zone_and_scrolls_both_directions()
 }
 
 #[test]
-fn holding_the_wheel_scrolls_until_release_without_starting_page_tools() {
+fn moving_before_middle_button_release_keeps_scrolling_without_starting_page_tools() {
     let (mut h, c) = harness();
     // A middle drag must not also draw with a selected tool (egui accepts any drag button).
     h.state_mut().quick_tool = printcraft_ui_egui::QuickTool::Crop;
@@ -108,10 +108,61 @@ fn holding_the_wheel_scrolls_until_release_without_starting_page_tools() {
     ok(&mut h, &c, "ui.drag", json!({ "from": [p.x, p.y], "to": [p.x, p.y + 120.0], "steps": 12, "button": "middle" }));
     h.run_steps(2);
     assert!(h.state().views[0].page_screen_rect(0).unwrap().top() < top - 20.0);
-    assert!(!h.state().views[0].auto_scrolling(), "release ends a held gesture");
+    assert!(h.state().views[0].auto_scrolling(), "release keeps scrolling toggled on even after movement");
+    let released = h.state().views[0].page_screen_rect(0).unwrap().top();
+    h.run_steps(8);
+    assert!(h.state().views[0].page_screen_rect(0).unwrap().top() < released - 30.0, "scrolling continues with no button held");
     assert!(h.state().views[0].crop_drag.is_none(), "the Crop tool must not receive a wheel drag");
     assert!(h.state().dialog.is_none());
     assert!(!h.state().session.get(h.state().views[0].id).unwrap().dirty);
+    ok(&mut h, &c, "ui.click", json!({ "x": p.x, "y": p.y + 120.0, "button": "middle" }));
+    assert!(!h.state().views[0].auto_scrolling(), "the next middle click toggles scrolling off");
+}
+
+#[test]
+fn autoscroll_uses_the_initial_click_position_when_input_arrives_in_one_frame() {
+    let (mut h, c) = harness();
+    let p = h.state().views[0].viewport_rect().center();
+    let moved = p + egui::vec2(0.0, 60.0);
+    let top = h.state().views[0].page_screen_rect(0).unwrap().top();
+    h.event(egui::Event::PointerMoved(p));
+    h.event(egui::Event::PointerButton { pos: p, button: egui::PointerButton::Middle, pressed: true, modifiers: egui::Modifiers::NONE });
+    h.event(egui::Event::PointerMoved(moved));
+    h.event(egui::Event::PointerButton { pos: moved, button: egui::PointerButton::Middle, pressed: false, modifiers: egui::Modifiers::NONE });
+    h.run_steps(8);
+    assert!(h.state().views[0].auto_scrolling());
+    assert!(h.state().views[0].page_screen_rect(0).unwrap().top() < top - 20.0, "distance is measured from the click, not the last mouse event");
+    ok(&mut h, &c, "ui.key", json!({ "key": "Escape" }));
+}
+
+#[test]
+fn farther_from_the_click_scrolls_faster_in_the_viewer_and_page_grid() {
+    use egui_kittest::kittest::Queryable;
+    for organize in [false, true] {
+        let (mut h, c) = harness_pages(40);
+        h.state_mut().views[0].organize = organize;
+        h.run_steps(3);
+        let top = |h: &Harness<'static, PrintCraftApp>| {
+            if organize { h.get_by_label("Page 1").rect().top() } else { h.state().views[0].page_screen_rect(0).unwrap().top() }
+        };
+        let p = start_autoscroll(&mut h, &c);
+        ok(&mut h, &c, "ui.move", json!({ "x": p.x, "y": p.y + 30.0 }));
+        let before_near = top(&h);
+        h.run_steps(8);
+        let near = before_near - top(&h);
+        ok(&mut h, &c, "ui.move", json!({ "x": p.x, "y": p.y + 100.0 }));
+        let before_far = top(&h);
+        h.run_steps(8);
+        let far = before_far - top(&h);
+        assert!(near > 0.0 && far > near * 3.0, "farther movement must be faster: organize={organize}, near={near}, far={far}");
+        ok(&mut h, &c, "ui.move", json!({ "x": p.x, "y": p.y }));
+        h.run_steps(2);
+        let at_anchor = top(&h);
+        h.run_steps(8);
+        assert_eq!(top(&h), at_anchor, "returning to the original click pauses scrolling");
+        assert!(h.state().views[0].auto_scrolling(), "the toggle stays on at the anchor");
+        ok(&mut h, &c, "ui.key", json!({ "key": "Escape" }));
+    }
 }
 
 #[test]
@@ -212,7 +263,7 @@ fn organize_pages_supports_autoscroll_without_selecting_or_reordering_pages() {
     assert!(h.state().views[0].selected.is_empty());
     assert!(h.state().views[0].org_drag.is_none());
     assert!(!h.state().session.get(h.state().views[0].id).unwrap().dirty);
-    start_autoscroll(&mut h, &c);
+    assert!(h.state().views[0].auto_scrolling(), "releasing the wheel leaves the grid scrolling on");
     h.state_mut().views[0].organize = false;
     h.run_steps(2);
     assert!(!h.state().views[0].auto_scrolling(), "changing canvas mode cancels the gesture");

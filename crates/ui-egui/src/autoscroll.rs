@@ -10,8 +10,6 @@ const MAX_SPEED: f32 = 1600.0;
 pub(crate) struct AutoScroll {
     anchor: Option<Pos2>,
     organize: bool,
-    /// A quick click latches; moving while holding the wheel makes release stop scrolling.
-    held_moved: bool,
     /// Own a cancelling click through its release, so it cannot also edit page content.
     cancel_button: Option<PointerButton>,
     block_input: bool,
@@ -24,7 +22,6 @@ impl AutoScroll {
 
     pub(crate) fn cancel(&mut self) {
         self.anchor = None;
-        self.held_moved = false;
         self.cancel_button = None;
         self.block_input = false;
     }
@@ -37,13 +34,17 @@ impl AutoScroll {
     /// once started, moving outside that viewport still controls the speed.
     pub(crate) fn update(&mut self, ui: &egui::Ui, viewport: egui::Rect, organize: bool) -> Vec2 {
         let ctx = ui.ctx();
-        let (pointer, middle_pressed, middle_down, middle_released, cancel, cancel_button, dt) = ctx.input(|i| {
+        let (pointer, middle_press, middle_down, middle_released, cancel, cancel_button, dt) = ctx.input(|i| {
             let cancel_button = [PointerButton::Primary, PointerButton::Secondary, PointerButton::Extra1, PointerButton::Extra2]
                 .into_iter()
                 .find(|button| i.pointer.button_pressed(*button));
             (
                 i.pointer.hover_pos(),
-                i.pointer.button_pressed(PointerButton::Middle),
+                // Read the press event itself: later movement in this frame must not move the anchor.
+                i.events.iter().find_map(|event| match event {
+                    Event::PointerButton { pos, button: PointerButton::Middle, pressed: true, .. } if pos.is_finite() => Some(*pos),
+                    _ => None,
+                }),
                 i.pointer.button_down(PointerButton::Middle),
                 i.pointer.button_released(PointerButton::Middle),
                 !i.focused
@@ -54,7 +55,7 @@ impl AutoScroll {
                 i.stable_dt,
             )
         });
-        self.block_input = self.active() || self.cancel_button.is_some() || middle_down || middle_released;
+        self.block_input = self.active() || self.cancel_button.is_some() || middle_press.is_some() || middle_down || middle_released;
         if let Some(button) = self.cancel_button {
             if !ctx.input(|i| i.pointer.button_down(button)) {
                 self.cancel_button = None;
@@ -67,28 +68,23 @@ impl AutoScroll {
             self.cancel_button = cancel_button;
             return Vec2::ZERO;
         }
-        if middle_pressed {
+        if let Some(pressed_at) = middle_press {
             if self.active() {
                 self.cancel();
                 self.block_input = true;
                 self.cancel_button = Some(PointerButton::Middle);
                 return Vec2::ZERO;
-            } else if !cancel && !ctx.egui_wants_keyboard_input() && ui.rect_contains_pointer(viewport) {
-                self.anchor = pointer.filter(|p| p.is_finite());
+            } else if !cancel
+                && !ctx.egui_wants_keyboard_input()
+                && viewport.intersect(ui.clip_rect()).contains(pressed_at)
+                && ctx.layer_id_at(pressed_at) == Some(ui.layer_id())
+            {
+                self.anchor = Some(pressed_at);
                 self.organize = organize;
-                self.held_moved = false;
             }
         }
         let (Some(anchor), Some(pointer)) = (self.anchor, pointer) else { return Vec2::ZERO };
         let displacement = pointer.y - anchor.y;
-        if middle_down && displacement.abs() > DEAD_ZONE {
-            self.held_moved = true;
-        }
-        if middle_released && self.held_moved {
-            self.cancel();
-            self.block_input = true;
-            return Vec2::ZERO;
-        }
         // Cap the elapsed time too: returning from an idle/hidden window must never jump pages.
         let delta = scroll_delta(displacement, dt);
         if delta != 0.0 {
@@ -144,6 +140,9 @@ mod tests {
             assert_eq!(scroll_delta(y, 0.016), 0.0);
         }
         assert!(scroll_delta(30.0, 0.016) < 0.0);
+        for (near, far) in [(13.0, 30.0), (30.0, 100.0), (100.0, 200.0)] {
+            assert!(scroll_delta(far, 0.016).abs() > scroll_delta(near, 0.016).abs());
+        }
         assert_eq!(scroll_delta(30.0, 0.016), -scroll_delta(-30.0, 0.016));
         assert_eq!(scroll_delta(1000.0, 0.016), -MAX_SPEED * 0.016);
         assert_eq!(scroll_delta(1000.0, 10.0), -MAX_SPEED * 0.05);

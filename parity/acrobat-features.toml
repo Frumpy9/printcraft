@@ -890,8 +890,8 @@ milestone = "M3"
 status = "partial"
 commands = []
 tools = []
-evidence = ["crates/ui-egui/tests/control.rs::middle_click_autoscroll_latches_has_a_dead_zone_and_scrolls_both_directions", "crates/ui-egui/tests/control.rs::organize_pages_supports_autoscroll_without_selecting_or_reordering_pages"]
-notes = "Middle-button vertical autoscroll in the document and Organize Pages on all platforms; click to latch or hold and release, with cancellation on Escape, pointer/wheel input, focus loss, tab changes and dialogs. Driven headlessly through the opt-in UI control channel (ui.click/ui.move/ui.drag). Keyboard-started timed scrolling is not implemented."
+evidence = ["crates/ui-egui/tests/control.rs::middle_click_autoscroll_latches_has_a_dead_zone_and_scrolls_both_directions", "crates/ui-egui/tests/control.rs::organize_pages_supports_autoscroll_without_selecting_or_reordering_pages", "crates/ui-egui/tests/control.rs::moving_before_middle_button_release_keeps_scrolling_without_starting_page_tools", "crates/ui-egui/tests/control.rs::farther_from_the_click_scrolls_faster_in_the_viewer_and_page_grid", "crates/ui-egui/tests/control.rs::autoscroll_uses_the_initial_click_position_when_input_arrives_in_one_frame"]
+notes = "Middle-button vertical autoscroll in the document and Organize Pages on all platforms; click to toggle, release keeps scrolling on, and speed increases with vertical distance from the initial click. Returning to the marker pauses scrolling. Cancels on another middle click, Escape, other pointer/wheel input, focus loss, tab changes and dialogs. Driven headlessly through the opt-in UI control channel (ui.click/ui.move/ui.drag). Keyboard-started timed scrolling is not implemented."
 
 [[feature]]
 id = "view.zoom-in-out"
