@@ -3,8 +3,8 @@
 use egui::{Context, CursorIcon, Event, Key, PointerButton, Pos2, Stroke, Vec2, vec2};
 
 const DEAD_ZONE: f32 = 12.0;
-const SPEED_PER_POINT: f32 = 8.0;
-const MAX_SPEED: f32 = 1600.0;
+const SPEED_PER_POINT: f32 = 16.0;
+const MAX_SPEED: f32 = 3200.0;
 
 #[derive(Default)]
 pub(crate) struct AutoScroll {
@@ -140,6 +140,7 @@ mod tests {
             assert_eq!(scroll_delta(y, 0.016), 0.0);
         }
         assert!(scroll_delta(30.0, 0.016) < 0.0);
+        assert!(scroll_delta(100.0, 1.0 / 60.0).abs() > 20.0, "a moderate displacement scrolls at least 1200 points per second");
         for (near, far) in [(13.0, 30.0), (30.0, 100.0), (100.0, 200.0)] {
             assert!(scroll_delta(far, 0.016).abs() > scroll_delta(near, 0.016).abs());
         }

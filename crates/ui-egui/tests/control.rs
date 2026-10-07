@@ -101,11 +101,16 @@ fn middle_click_autoscroll_latches_has_a_dead_zone_and_scrolls_both_directions()
 #[test]
 fn moving_before_middle_button_release_keeps_scrolling_without_starting_page_tools() {
     let (mut h, c) = harness();
+    // Keep the tracked page on screen while the faster gesture continues after release.
+    h.state_mut().set_option("zoom", "400").unwrap();
+    h.run_steps(3);
+    h.state_mut().views[0].go_to_page(0);
+    h.run_steps(2);
     // A middle drag must not also draw with a selected tool (egui accepts any drag button).
     h.state_mut().quick_tool = printcraft_ui_egui::QuickTool::Crop;
     let p = h.state().views[0].viewport_rect().center();
     let top = h.state().views[0].page_screen_rect(0).unwrap().top();
-    ok(&mut h, &c, "ui.drag", json!({ "from": [p.x, p.y], "to": [p.x, p.y + 120.0], "steps": 12, "button": "middle" }));
+    ok(&mut h, &c, "ui.drag", json!({ "from": [p.x, p.y], "to": [p.x, p.y + 60.0], "steps": 12, "button": "middle" }));
     h.run_steps(2);
     assert!(h.state().views[0].page_screen_rect(0).unwrap().top() < top - 20.0);
     assert!(h.state().views[0].auto_scrolling(), "release keeps scrolling toggled on even after movement");
@@ -115,7 +120,7 @@ fn moving_before_middle_button_release_keeps_scrolling_without_starting_page_too
     assert!(h.state().views[0].crop_drag.is_none(), "the Crop tool must not receive a wheel drag");
     assert!(h.state().dialog.is_none());
     assert!(!h.state().session.get(h.state().views[0].id).unwrap().dirty);
-    ok(&mut h, &c, "ui.click", json!({ "x": p.x, "y": p.y + 120.0, "button": "middle" }));
+    ok(&mut h, &c, "ui.click", json!({ "x": p.x, "y": p.y + 60.0, "button": "middle" }));
     assert!(!h.state().views[0].auto_scrolling(), "the next middle click toggles scrolling off");
 }
 
