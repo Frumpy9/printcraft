@@ -1,4 +1,4 @@
-//! printcraft-forms — interactive forms (AcroForm, ISO 32000-2 §12.7), execution plan M6.1–M6.2.
+//! pdfcraft-forms — interactive forms (AcroForm, ISO 32000-2 §12.7), execution plan M6.1–M6.2.
 //!
 //! - [`fields`]: the field tree flattened to terminal fields, each with its widgets (page,
 //!   rectangle, on-state), inherited attributes (`/FT`, `/Ff`, `/V`, `/DV`, `/DA`, `/Q`,
@@ -13,7 +13,7 @@
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
-use printcraft_cos::{Dict, Document, ObjRef, Object, PdfString};
+use pdfcraft_cos::{Dict, Document, ObjRef, Object, PdfString};
 
 mod actions;
 pub mod af;
@@ -23,7 +23,8 @@ pub mod detect;
 mod scripting;
 pub use actions::{FieldAction, Trigger, field_actions, set_field_actions};
 pub use author::{
-    BorderStyle, FieldFont, FieldProps, Look, NewField, add_field, delete_field, duplicate_field, look, redraw_field, set_button_icon, set_props,
+    BorderStyle, CheckStyle, FieldFont, FieldProps, Look, NewField, add_field, check_style, delete_field, duplicate_field, look, redraw_field,
+    set_button_icon, set_props,
 };
 pub use scripting::{
     FieldChange, FieldEvent, NoScripts, ScriptResult, Scripts, apply_script_changes, document_scripts, document_scripts_named, set_document_script,
@@ -44,7 +45,7 @@ pub enum FormError {
     #[error("{0}")]
     Invalid(String),
     #[error("{0}")]
-    Cos(#[from] printcraft_cos::CosError),
+    Cos(#[from] pdfcraft_cos::CosError),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -800,7 +801,7 @@ fn set_states(doc: &mut Document, f: &Field, on: Option<&str>) -> Result<(), For
             (Some(c), Some(s)) if c == s => s,
             _ => "Off",
         };
-        // A widget without appearances for its states gets PrintCraft's own.
+        // A widget without appearances for its states gets PdfCraft's own.
         let has_ap = doc.get(w.obj).as_dict().and_then(|d| d.get(b"AP").cloned()).is_some();
         if !has_ap {
             let on_name = w.on_state.clone().unwrap_or_else(|| on.unwrap_or("Yes").to_string());
