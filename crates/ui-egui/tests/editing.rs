@@ -174,9 +174,9 @@ fn organize_select_all_applies_operations_to_every_page() {
 #[test]
 fn organize_select_all_works_without_page_editing_permission() {
     let mut h = harness(3, |app| {
-        app.apply_edit(printcraft_engine::Edit::Protect(printcraft_engine::Protection {
+        app.apply_edit(pdfcraft_engine::Edit::Protect(pdfcraft_engine::Protection {
             permissions_password: Some("owner".into()),
-            changes: printcraft_engine::Changes::None,
+            changes: pdfcraft_engine::Changes::None,
             ..Default::default()
         }));
         let bytes = app.session.save_bytes(app.views[0].id).unwrap();
@@ -197,7 +197,7 @@ fn organize_select_all_works_without_page_editing_permission() {
     assert_eq!(h.state().views[0].selected.len(), 1);
 
     // The opener refuses zero-page PDFs, but the view method also handles empty geometry.
-    let mut empty = printcraft_ui_egui::canvas::DocView::new(printcraft_engine::DocId(0), &Default::default());
+    let mut empty = pdfcraft_ui_egui::canvas::DocView::new(pdfcraft_engine::DocId(0), &Default::default());
     empty.organize = true;
     assert!(!empty.select_all());
     assert!(empty.selected.is_empty());
